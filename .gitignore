@@ -1,0 +1,38 @@
+# macOS
+.DS_Store
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# VS Code settings
+.vscode/
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# Testing and type checking caches
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Project outputs
+# Currently ignore all .txt files (e.g., quiz results). If you need to keep
+# some text files under version control, replace this with a more specific
+# pattern or move outputs into a dedicated folder like `results/` and ignore that.
+*.txt
