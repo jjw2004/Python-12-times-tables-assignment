@@ -5,17 +5,65 @@ import random
 import datetime
 import os
 import threading
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
 
-# NOTE: External API calls (NumbersAPI) are temporarily disabled.
-# To re-enable maths facts from NumbersAPI later:
-#  1) Add `import requests` at the top.
-#  2) Restore the original implementation of `get_maths_fact` to call
-#     http://numbersapi.com/{number}/math and return the response text.
 
 QUIZ_RESULTS = []
 PLAYER_NAME = "Pupil"
+FACT_SHOWN = False
 
-# Function to get maths fact (API disabled: returns local fallback facts)
+# Function to get maths fact (API as mentioned in the assignment on moodle has not been added yet)
+def compute_answer(a, op, b):
+    """Compute answer using NumPy if available, else pure Python.
+    Supports '+', '-', '*', '/' returning float for division rounded to 2dp.
+    """
+    if HAS_NUMPY:
+        if op == '+':
+            return int(np.add(a, b))
+        if op == '-':
+            return int(np.subtract(a, b))
+        if op == '*':
+            return int(np.multiply(a, b))
+        if op == '/':
+            return round(float(np.divide(a, b)), 2)
+    # fallback
+    if op == '+':
+        return a + b
+    if op == '-':
+        return a - b
+    if op == '*':
+        return a * b
+    if op == '/':
+        return round(a / b, 2)
+    raise ValueError(f"Unsupported op: {op}")
+
+def generate_table_lines(num, op):
+    """Return list of strings for num op i for i=1..12 using vectorised operations if NumPy present."""
+    lines = []
+    if HAS_NUMPY and op in ['+', '-', '*', '/']:
+        i_vals = np.arange(1, 13)
+        if op == '+':
+            ans = num + i_vals
+        elif op == '-':
+            ans = num - i_vals
+        elif op == '*':
+            ans = num * i_vals
+        else:  # division
+            ans = np.round(num / i_vals.astype(float), 2)
+        for i, a in zip(i_vals, ans):
+            lines.append(f"{num} {op} {int(i)} = {a}")
+        return lines
+    # fallback python
+    for i in range(1, 13):
+        lines.append(f"{num} {op} {i} = {compute_answer(num, op, i)}")
+    return lines
+
+def numpy_status_text():
+    return "NumPy: ENABLED" if HAS_NUMPY else "NumPy: NOT INSTALLED (using Python math)"
 def get_maths_fact(number):
     fallback_facts = [
         "Did you know? 0 is the only number that can't be represented in Roman numerals.",
@@ -72,27 +120,13 @@ def learn_tables():
             messagebox.showerror("Error", "Invalid number.")
             return
 
-        table_text = ''
-        for i in range(1, 13):
-            if op == '+':
-                ans = num + i
-            elif op == '-':
-                ans = num - i
-            elif op == '*':
-                ans = num * i
-            else:
-                ans = round(num / i, 2)
-            table_text += f"{num} {op} {i} = {ans}\n"
+        lines = generate_table_lines(num, op)
+        table_text = "\n".join(lines)
 
         # show table in a simple popup
         messagebox.showinfo("Table Result", table_text)
 
-        # fetch a maths fact in background
-        def fetch_and_show():
-            fact = get_maths_fact(num)
-            root.after(0, lambda: messagebox.showinfo("Maths Fact", fact))
-
-        threading.Thread(target=fetch_and_show, daemon=True).start()
+        # Note: Maths fact popups are shown only once at startup now.
 
     def start_learning():
         op = op_var.get()
@@ -125,23 +159,11 @@ def learn_tables():
             i = index['i']
             if i > 12:
                 messagebox.showinfo("Well done!", f"Great work, {PLAYER_NAME}! You completed the table for {num} {op}.")
-                # offer a maths fact
-                def fetch_and_show():
-                    fact = get_maths_fact(num)
-                    root.after(0, lambda: messagebox.showinfo("Maths Fact", fact))
-                threading.Thread(target=fetch_and_show, daemon=True).start()
                 main_menu()
                 return
 
             # compute correct answer depending on op
-            if op == '+':
-                correct = num + i
-            elif op == '-':
-                correct = num - i
-            elif op == '*':
-                correct = num * i
-            else:
-                correct = round(num / i, 2)
+            correct = compute_answer(num, op, i)
 
             question_label.config(text=f"{num} {op} {i} = ?")
             answer_entry.delete(0, 'end')
@@ -160,7 +182,10 @@ def learn_tables():
 
                 # comparison with tolerance for division
                 if isinstance(correct, float):
-                    is_correct = abs(float(user_val) - correct) < 0.01
+                    if HAS_NUMPY:
+                        is_correct = bool(np.isclose(float(user_val), correct, atol=0.01))
+                    else:
+                        is_correct = abs(float(user_val) - correct) < 0.01
                 else:
                     is_correct = int(user_val) == correct
 
@@ -186,6 +211,9 @@ def learn_tables():
         ask_next()
 
     tk.Button(root, text="Show Table", command=show_table, bg='#87cefa', font=("Arial", 12)).pack(pady=6)
+    # Show NumPy status
+    tk.Label(root, text=numpy_status_text(), font=("Arial", 10), fg='gray').pack(pady=2)
+    
     tk.Button(root, text="Start Learning", command=start_learning, bg='#8fbc8f', font=("Arial", 12)).pack(pady=6)
     tk.Button(root, text="Back to Menu", command=main_menu).pack(pady=5)
 
@@ -251,10 +279,7 @@ def take_quiz():
         op_code = {'+':1, '-':2, '*':3, '/':4}[op]
 
         # calculate correct answer
-        if op == '/':
-            correct_ans = round(a / b, 2)
-        else:
-            correct_ans = int(eval(f"{a}{op}{b}"))
+        correct_ans = compute_answer(a, op, b)
 
         # store in results
         QUIZ_RESULTS[question_num[0]][0] = a
@@ -288,7 +313,10 @@ def take_quiz():
 
             # check correctness (allow small tolerance for division)
             if isinstance(correct_ans, float):
-                correct = abs(float(user_ans) - correct_ans) < 0.01
+                if HAS_NUMPY:
+                    correct = bool(np.isclose(float(user_ans), correct_ans, atol=0.01))
+                else:
+                    correct = abs(float(user_ans) - correct_ans) < 0.01
             else:
                 try:
                     correct = int(user_ans) == correct_ans
@@ -299,11 +327,6 @@ def take_quiz():
                 QUIZ_RESULTS[question_num[0]][5] = 1
                 consecutive_wrong[0] = 0
                 messagebox.showinfo("Correct!", f"Well done, {PLAYER_NAME}!")
-                # fetch maths fact in background
-                def fetch_fact():
-                    fact = get_maths_fact(a)
-                    root.after(0, lambda: messagebox.showinfo("Maths Fact", fact))
-                threading.Thread(target=fetch_fact, daemon=True).start()
             else:
                 QUIZ_RESULTS[question_num[0]][5] = 0
                 consecutive_wrong[0] += 1
@@ -333,8 +356,10 @@ def show_results(name):
     score = sum([1 for row in QUIZ_RESULTS if row[5]==1])
     tk.Label(root, text=f"Score: {score}/{len(QUIZ_RESULTS)}").pack(pady=5)
     
+    op_map_rev = {1: '+', 2: '-', 3: '*', 4: '/'}
     for i, row in enumerate(QUIZ_RESULTS):
-        tk.Label(root, text=f"{row[0]} {row[1]} {row[2]} = {row[4]} | Your Answer: {row[3]} | {'Correct' if row[5]==1 else 'Incorrect'}").pack()
+        op_sym = op_map_rev.get(row[1], '?')
+        tk.Label(root, text=f"{row[0]} {op_sym} {row[2]} = {row[4]} | Your Answer: {row[3]} | {'Correct' if row[5]==1 else 'Incorrect'}").pack()
     
     # Save to file
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
@@ -362,7 +387,19 @@ def ask_player_name():
         # If dialogs aren't available for some reason, keep default name
         PLAYER_NAME = PLAYER_NAME
 
+def show_startup_fact_once():
+    global FACT_SHOWN
+    if FACT_SHOWN:
+        return
+    try:
+        # pick a number between 0 and 12 for a relevant fact
+        n = random.randint(0, 12)
+        messagebox.showinfo("Maths Fact", get_maths_fact(n))
+    finally:
+        FACT_SHOWN = True
 
 ask_player_name()
+# Show a single maths fact after the name is provided
+show_startup_fact_once()
 main_menu()
 root.mainloop()
